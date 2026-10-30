@@ -208,7 +208,7 @@ def search_scans(
 ):
     if not q or len(q) < 2:
         raise HTTPException(status_code=400, detail="Search query must be at least 2 characters")
-    results = search_scans_by_query(db, q)
+    results = search_scans_by_query(db, q, current_user.id)
     return {"results": results, "count": len(results)}
 
 
@@ -218,11 +218,17 @@ def get_scan(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    scan = db.query(models.ScanResult).filter(models.ScanResult.id == scan_id).first()
+    scan = (
+        db.query(models.ScanResult)
+        .filter(
+            models.ScanResult.id == scan_id,
+            models.ScanResult.owner_id == current_user.id,
+        )
+        .first()
+    )
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
     return scan
-
 
 @app.patch("/scans/{scan_id}", response_model=ScanOut)
 def update_scan(

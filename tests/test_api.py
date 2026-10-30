@@ -148,3 +148,93 @@ def test_delete_scan():
 
     resp = client.delete(f"/scans/{scan_id}", headers=auth_headers(token))
     assert resp.status_code == 204
+
+def test_user_cannot_read_another_users_scan():
+    alice_token = register_and_login()
+    bob_token = register_and_login(
+        username = "bob",
+        email = "bob@example.com",
+    )
+
+    created = client.post(
+        "/scans",
+        json={
+            "title": "Alice private finding",
+            "severity": "high",
+            "affected_component": "internal-api"
+        },
+        headers=auth_headers(alice_token),
+    )
+    assert created.status_code == 201
+    scan_id = created.json()["id"]
+
+    owner_response = client.get(
+        f"/scans/{scan_id}",
+
+    headers=auth_headers(alice_token),
+
+    )
+    assert owner_response.status_code == 200
+
+    other_user_response = client.get(
+        f"/scans/{scan_id}",
+        headers=auth_headers(bob_token),
+    )
+    assert other_user_response.status_code == 404
+
+def test_search_only_returns_current_user_scans():
+    alice_token = register_and_login()
+    bob_token = register_and_login(
+        username="bob",
+        email="bob@example.com",
+    )
+
+    for token, title in (
+        (alice_token, "Isolation Alice private finding"),
+        (bob_token, "Isolation Bob private finding"),
+    ):
+        created = client.post(
+            "/scans",
+            json={
+                "title": title,
+                "severity": "high",
+                "affected_component": "internal-api",
+            },
+            headers=auth_headers(token),
+        )
+        assert created.status_code == 201
+
+    response = client.get(
+        "/scans/search",
+        params={"q": "Isolation"},
+        headers=auth_headers(bob_token),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    titles = {item["title"] for item in body["results"]}
+    assert titles == {"Isolation Bob private finding"}
+    assert body["count"] == 1
+
+def test_search_treats_sql_injection_literal_text():
+    token = register_and_login()
+
+    created = client.post(
+        "/scans",
+        json={
+            "title": "Private security finding",
+            "severity": "high",
+            "affected_component": "internal-api",
+        },
+        headers=auth_headers(token),
+    )
+    assert created.status_code == 201
+
+    response = client.get(
+        "/scans/search",
+        params={"q": "' OR 1=1 --"},
+        headers=auth_headers(token),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["results"] == []
+    assert body["count"] == 0
