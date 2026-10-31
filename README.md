@@ -215,3 +215,25 @@ We are not grading on volume. We are grading on judgment.
 - **Communication**: Would a non-technical executive understand your summary?
 
 Good luck. If anything in the brief is ambiguous, document your assumption and proceed.
+
+## Container build and smoke test
+
+The image was built and smoke-tested on the existing Floci VM (Ubuntu 24.04.5, x86_64). The /openapi.json endpoint responded successfully after startup retries. The test container was stopped, and port 18000 was released. This verifies container build and API reachability; it is not a deployment.
+
+Build the image from the repository root on a Docker host:
+
+    docker build -t vulntracker:local .
+
+Before running the container, set a temporary SECRET_KEY securely in your shell. Do not print or commit its value. Then start the container on loopback port 18000:
+
+    docker run --detach --rm --name vulntracker-smoke \
+      --env SECRET_KEY \
+      -p 127.0.0.1:18000:8000 \
+      vulntracker:local
+
+After the app starts, check the API and stop the container:
+
+    curl --fail http://127.0.0.1:18000/openapi.json
+    docker stop vulntracker-smoke
+
+Helm and scanner results remain pending a successful CI run and review of its artifacts.

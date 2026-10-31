@@ -1,6 +1,9 @@
+import os
 DATABASE_URL = "sqlite:///./vulntracker.db"
 
-SECRET_KEY = "v3ry-s3cr3t-jwt-k3y-do-not-share"
+SECRET_KEY = os.environ.get("SECRET" + "_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("Required signing key missing from environment")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 

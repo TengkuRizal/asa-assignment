@@ -1,0 +1,49 @@
+replicaCount: 1
+
+image:
+  repository: vulntracker
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+externalSecret:
+  enabled: true
+  secretStoreName: aws-se...ager
+  remoteKey: /asa-assignment/production
+  property: SECRET_KEY
+  targetSecretName: vulntr...rets
+  refreshInterval: 1h
+
+ingress:
+  enabled: false
+  className: nginx
+  host: vulntracker.example.invalid
+  tlsSecretName: ***
+
+networkPolicy:
+  enabled: true
+  ingressNamespace: ingress-nginx
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

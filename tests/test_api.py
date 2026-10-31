@@ -238,3 +238,82 @@ def test_search_treats_sql_injection_literal_text():
     body = response.json()
     assert body["results"] == []
     assert body["count"] == 0
+
+def test_owner_can_create_and_read_shared_scan():
+    token = register_and_login()
+    created = client.post(
+        "/scans",
+        json={
+            "title": "Shared audit finding",
+            "severity": "high",
+            "affected_component": "audit-api",
+        },
+        headers=auth_headers(token),
+    )
+    assert created.status_code == 201
+    scan_id = created.json()["id"]
+
+    share_response = client.post(
+        f"/scans/{scan_id}/share",
+        headers=auth_headers(token),
+    )
+    assert share_response.status_code == 200
+    share_url = share_response.json()["share_url"]
+    share_token = share_url.rstrip("/").rsplit("/", 1)[-1]
+
+    public_response = client.get(f"/share/{share_token}")
+    assert public_response.status_code == 200
+    assert public_response.json()["id"] == scan_id
+    assert public_response.json()["title"] == "Shared audit finding"
+
+def test_user_cannot_share_another_users_scan():
+    owner_token = register_and_login()
+    other_token = register_and_login(
+        username="bob",
+        email="bob@example.com",
+    )
+
+    created = client.post(
+        "/scans",
+        json={
+            "title": "Owner-only finding",
+            "severity": "high",
+            "affected_component": "audit-api",
+        },
+        headers=auth_headers(owner_token),
+    )
+    assert created.status_code == 201
+
+    denied = client.post(
+        f"/scans/{created.json()['id']}/share",
+        headers=auth_headers(other_token),
+    )
+    assert denied.status_code == 404
+
+def test_expired_share_link_is_not_accessible():
+    owner_token = register_and_login()
+    created = client.post(
+        "/scans",
+        json={
+            "title": "Expired share finding",
+            "severity": "high",
+            "affected_component": "audit-api",
+        },
+        headers=auth_headers(owner_token),
+    )
+    assert created.status_code == 201
+
+    share_response = client.post(
+        f"/scans/{created.json()['id']}/share",
+        headers=auth_headers(owner_token),
+    )
+    assert share_response.status_code == 200
+    share_token = share_response.json()["share_url"].rstrip("/").rsplit("/", 1)[-1]
+
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "UPDATE share_links SET expires_at = '2000-01-01 00:00:00'"
+        )
+
+    response = client.get(f"/share/{share_token}")
+    assert response.status_code == 404
