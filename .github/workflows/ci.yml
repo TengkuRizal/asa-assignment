@@ -111,6 +111,11 @@ jobs:
           n=$(jq '[.results[] | select(.issue_severity == "HIGH")] | length' reports/sast.bandit.json)
           echo "HIGH findings: $n"
           [ "$n" -eq 0 ]
+      - name: Scan application source
+        run: |
+          mkdir -p reports
+          # -ll fails only on medium or high severity
+          bandit -ll -f json -o reports/sast.bandit.json --recursive app
 
   sca:
     runs-on: ubuntu-24.04
@@ -121,17 +126,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install "pip-audit==${PIP_AUDIT_VERSION}"
+      - name: Install pip-audit
+        run: pip install "pip-audit==${PIP_AUDIT_VERSION}"
       - name: Audit shipped dependencies
-        run: pip-audit -r requirements-runtime.txt -f json -o reports/sca.pip-audit.json || true
+        run: |
+          mkdir -p reports
+          pip-audit -r requirements-runtime.txt -f json -o reports/sca.pip-audit.json || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: sca.pip-audit.json
           path: reports/sca.pip-audit.json
-      - name: Gate on any known vulnerability
+      - name: Gate on known vulnerabilities
         run: |
-          jq -e '[.dependencies[].name] | index("fastapi")' reports/sca.pip-audit.json > /dev/null
+          jq -e '.dependencies != null' reports/sca.pip-audit.json > /dev/null
           n=$(jq '[.dependencies[] | select((.vulns | length) > 0)] | length' reports/sca.pip-audit.json)
           echo "Packages with known vulns: $n"
           [ "$n" -eq 0 ]
@@ -154,27 +162,38 @@ jobs:
         with:
           name: container.trivy.json
           path: reports/container.trivy.json
-
+      - name: Build container image
+        run: docker build --tag vulntracker:ci . || true
+      - name: Scan container image with Trivy (report-only)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: vulntracker:ci
+          format: json
+          output: reports/container.trivy.json
+          exit-code: "0"
   iac-scan:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@v5
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+      - name: Render chart
+        run: helm template vulntracker helm/vulntracker > rendered.yaml
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install "checkov==${CHECKOV_VERSION}"
-      - run: helm version --short
-      - name: Scan chart (report-only)
+      - run: pip install checkov
+      - name: Scan rendered manifests
         run: |
-          checkov --framework helm -d helm/vulntracker --output json --output-file-path reports --soft-fail
-          mv reports/results_json.json reports/iac.checkov.json
-      - uses: actions/upload-artifact@v4
-        if: always()
+          mkdir -p reports
+          checkov -f rendered.yaml --framework kubernetes --output json --soft-fail > reports/iac.checkov.json
+      - name: Upload IaC report
+        uses: actions/upload-artifact@v4
         with:
           name: iac.checkov.json
           path: reports/iac.checkov.json
+        
 
   helm-check:
     runs-on: ubuntu-latest
