@@ -20,3 +20,5 @@ env/
 htmlcov/
 node_modules/
 .claude/
+.venv-checkov/
+.venv-checkov/

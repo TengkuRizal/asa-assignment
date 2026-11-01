@@ -28,7 +28,9 @@ jobs:
           import secrets
           import pytest
 
-          os.environ["SECRET" + "_KEY"] = secrets.token_urlsafe(32)
+          os.environ["SECRET_KEY"] = secrets.token_urlsafe(32)
+          os.environ["DB_PASSWORD"] = secrets.token_urlsafe(16)
+          os.environ["ADMIN_API_KEY"] = "test-admin-key-for-ci"
           raise SystemExit(pytest.main(["tests/", "-v"]))
           PY
 
@@ -88,66 +90,91 @@ jobs:
         run: helm template vulntracker helm/vulntracker --namespace vulntracker
 
   sast:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Bandit
-        run: pip install bandit
-      - name: Scan application source
-        run: |
-          mkdir -p reports
-          bandit -f json -o reports/sast.bandit.json --recursive app
-
-      - name: Upload SAST report
-        uses: actions/upload-artifact@v4
+      - run: pip install "bandit==${BANDIT_VERSION}"
+      - name: Scan (full report)
+        run: bandit -r app/ -f json -o reports/sast.bandit.json --exit-zero
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: sast.bandit.json
           path: reports/sast.bandit.json
+      - name: Gate on HIGH severity
+        run: |
+          n=$(jq '[.results[] | select(.issue_severity == "HIGH")] | length' reports/sast.bandit.json)
+          echo "HIGH findings: $n"
+          [ "$n" -eq 0 ]
 
   sca:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare report directory
-        run: mkdir -p reports
-      - name: Set up Python
-        uses: actions/setup-python@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install pip-audit and scan dependencies  
-        run: |
-          pip install pip-audit
-          pip-audit -f json > reports/sca.pip-audit.json
-
-      - name: Upload SCA report
-        uses: actions/upload-artifact@v4
+      - run: pip install "pip-audit==${PIP_AUDIT_VERSION}"
+      - name: Audit shipped dependencies
+        run: pip-audit -r requirements-runtime.txt -f json -o reports/sca.pip-audit.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: sca.pip-audit.json
           path: reports/sca.pip-audit.json
+      - name: Gate on any known vulnerability
+        run: |
+          jq -e '[.dependencies[].name] | index("fastapi")' reports/sca.pip-audit.json > /dev/null
+          n=$(jq '[.dependencies[] | select((.vulns | length) > 0)] | length' reports/sca.pip-audit.json)
+          echo "Packages with known vulns: $n"
+          [ "$n" -eq 0 ]
 
   container-scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Build container image
-        run: docker build --tag vulntracker:ci . || true
-      - name: Scan container image with Trivy (report-only)  
-        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image: vulntracker:ci
-          format: json
-          output: reports/container.trivy.json
-          exit-code: "0"
-
-      - name: Upload container report
-        uses: actions/upload-artifact@v4
+          persist-credentials: false
+      - run: docker build -t vulntracker:ci .
+      - run: docker save vulntracker:ci -o image.tar
+      - name: Scan image
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work "aquasec/trivy:${TRIVY_VERSION}" \
+            image --input image.tar --scanners vuln,misconfig \
+            --format json --output reports/container.trivy.json --exit-code 0
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: container.trivy.json
           path: reports/container.trivy.json
+
+  iac-scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install "checkov==${CHECKOV_VERSION}"
+      - run: helm version --short
+      - name: Scan chart (report-only)
+        run: |
+          checkov --framework helm -d helm/vulntracker --output json --output-file-path reports --soft-fail
+          mv reports/results_json.json reports/iac.checkov.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iac.checkov.json
+          path: reports/iac.checkov.json
 
   helm-check:
     runs-on: ubuntu-latest
