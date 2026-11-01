@@ -28,12 +28,12 @@ spec:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
-          env:
-            - name: SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.externalSecret.targetSecretName }}
-                  key: SECRET_KEY
+          volumeMounts:
+            - name: secrets
+              mountPath: /run/secrets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /openapi.json
@@ -50,3 +50,16 @@ spec:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: secrets
+          secret:
+            secretName: {{ .Values.externalSecret.targetSecretName }}
+            items:
+              - key: SECRET_KEY
+                path: secret_key
+              - key: DB_PASSWORD
+                path: db_password
+              - key: ADMIN_API_KEY
+                path: admin_api_key
+        - name: tmp
+          emptyDir: {}

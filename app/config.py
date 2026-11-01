@@ -1,17 +1,41 @@
 import os
-DATABASE_URL = "sqlite:///./vulntracker.db"
+from pathlib import Path
 
-SECRET_KEY = os.environ.get("SECRET" + "_KEY")
-if not SECRET_KEY:
-    raise RuntimeError("Required signing key missing from environment")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Database credentials (migrate to env vars before production deployment)
-DB_USER = "vulntracker_app"
-DB_PASSWORD = "Tr@cker2024!"
+def _load_secret(name: str, default: str | None = None) -> str:
+    """Load a secret from a mounted file (Kubernetes) or an environment variable.
 
-# Internal service API key
-ADMIN_API_KEY = "sk-vt-prod-8f3a2b1c9d4e5f6a7b8c9d0e1f2a3b4c"
+    File path can be overridden with <NAME>_FILE; defaults to /run/secrets/<name.lower()>.
+    Falls back to the plain environment variable for local development / docker run.
+    """
+    path = Path(os.environ.get(f"{name}_FILE", f"/run/secrets/{name.lower()}"))
+    if path.is_file():
+        value = path.read_text(encoding="utf-8").strip()
+        if value:
+            return value
 
-NOTIFY_SERVICE_URL = "http://localhost:3001"
+    value = os.environ.get(name)
+    if value:
+        return value
+
+    if default is not None:
+        return default
+    raise RuntimeError(f"Required secret {name} not configured")
+
+
+# --- JWT configuration ---
+SECRET_KEY = _load_secret("SECRET_KEY")
+ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+
+# --- Database configuration ---
+# SQLite default preserved for local dev and tests. Production overrides via DATABASE_URL.
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./vulntracker.db")
+
+# --- Secrets previously hardcoded in source (now loaded from file or env) ---
+DB_USER = _load_secret("DB_USER", default="vulntracker_app")
+DB_PASSWORD = _load_secret("DB_PASSWORD")
+ADMIN_API_KEY = _load_secret("ADMIN_API_KEY")
+
+# --- Internal service configuration ---
+NOTIFY_SERVICE_URL = os.environ.get("NOTIFY_SERVICE_URL", "http://localhost:3001")

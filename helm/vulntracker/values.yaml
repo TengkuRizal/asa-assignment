@@ -11,17 +11,16 @@ service:
 
 externalSecret:
   enabled: true
-  secretStoreName: aws-se...ager
+  secretStoreName: aws-secrets-manager
   remoteKey: /asa-assignment/production
-  property: SECRET_KEY
-  targetSecretName: vulntr...rets
+  targetSecretName: vulntracker-secrets
   refreshInterval: 1h
 
 ingress:
   enabled: false
   className: nginx
   host: vulntracker.example.invalid
-  tlsSecretName: ***
+  tlsSecretName: vulntracker-tls
 
 networkPolicy:
   enabled: true
@@ -36,6 +35,7 @@ podSecurityContext:
 
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
