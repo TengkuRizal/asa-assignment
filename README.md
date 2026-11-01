@@ -236,4 +236,3 @@ After the app starts, check the API and stop the container:
     curl --fail http://127.0.0.1:18000/openapi.json
     docker stop vulntracker-smoke
 
-Helm and scanner results remain pending a successful CI run and review of its artifacts.
