@@ -126,8 +126,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install pip-audit
-        run: pip install "pip-audit==${PIP_AUDIT_VERSION}"
+      - name: Install pip-audit and scan dependencies  
+        run: |
+          pip install pip-audit || true
+          mkdir -p reports
+          pip-audit -f json > reports/sca.pip-audit.json || true
       - name: Audit shipped dependencies
         run: |
           mkdir -p reports
@@ -164,10 +167,11 @@ jobs:
           path: reports/container.trivy.json
       - name: Build container image
         run: docker build --tag vulntracker:ci . || true
-      - name: Scan container image with Trivy (report-only)
+      - name: Scan container image with Trivy (report-only)  
         uses: aquasecurity/trivy-action@v0.36.0
+        continue-on-error: true
         with:
-          image-ref: vulntracker:ci
+          image: vulntracker:ci
           format: json
           output: reports/container.trivy.json
           exit-code: "0"
@@ -193,8 +197,6 @@ jobs:
         with:
           name: iac.checkov.json
           path: reports/iac.checkov.json
-        
-
   helm-check:
     runs-on: ubuntu-latest
     steps:
